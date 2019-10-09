@@ -34,21 +34,31 @@ key_t  mess_que;
 void *tech_function()
 {
 	struct message mess_tech;
+	int error;
 	while(flag != 1)
 	{
-		mess_tech.text[0] = '0';
-		mess_tech.types = 2L;
-		sendto(fd_sock_inet, &mess_tech, sizeof(mess_tech), 0, (struct sockaddr *)&addr_client, sockaddr_in_size);
-		mess_tech.text[0] = '1';
-		sleep(10);
-		msgrcv(id_mq, (void *) &mess_tech, sizeof(mess_tech), 2L, 0);
-		if(mess_tech.text[0] == '1')
+		error = msgrcv(id_mq, (void *) &mess_tech, sizeof(mess_tech), 3L, IPC_NOWAIT);
+		if(error != -1)
 		{
 			flag = 1;
-			puts("Disconnection!");
+			puts("(User): The user left.");
+			pthread_cancel(tech_channel);
+		}
+		else
+		{
+			mess_tech.text[0] = '0';
+			mess_tech.types = 2L;
+			sendto(fd_sock_inet, &mess_tech, sizeof(mess_tech), 0, (struct sockaddr *)&addr_client, sockaddr_in_size);
+			sleep(5);
+			error = msgrcv(id_mq, (void *) &mess_tech, sizeof(mess_tech), 2L, IPC_NOWAIT);
+			if((mess_tech.text[0] != '2') && (error == -1))
+			{
+				flag = 1;
+				puts("Disconnection!");
+			}
 		}
 	}
-	pthread_cancel(tech_channel);
+	pthread_exit(0);
 }
 /*Функция приема сообщений с той стороны*/
 void *recevier_function()
@@ -57,22 +67,16 @@ void *recevier_function()
 	while(flag != 1)
 	{
 		recvfrom(fd_sock_inet, &mess_recev, sizeof(mess_recev), 0, (struct sockaddr *) &addr_client, &sockaddr_in_size);
-		if(mess_recev.types = 1L)
+		if(mess_recev.types == 1L)
 		{
 			printf("(User): %s", mess_recev.text);
 		}
-		else if((mess_recev.types = 2L) && (0 == strcmp(mess_recev.text, "I'm going!")))
-		{
-			flag = 1;
-			puts("(User): The user left.");
-		}
 		else
 		{
-			mess_recev.types = 2L;
 			msgsnd(id_mq, (void *) &mess_recev, sizeof(mess_recev), 0);
 		}
 	}
-	pthread_cancel(recevier);
+	pthread_exit(0);
 }
 
 int main(int argc, char *argv[])
@@ -136,24 +140,26 @@ int main(int argc, char *argv[])
 	}
 	while(flag != 1)
 	{
-		mess.types = 1L;
 		fgets(mess.text, 255, stdin);
 		if(flag != 1)
 		{
-			if(0 != strcmp(mess.text, "!exit!"))
+			if(0 == strcmp(mess.text, "!exit!\n"))
 			{
+				flag = 1;
+				mess.types = 3L;
+				strcpy(mess.text, "1\n");
 				sendto(fd_sock_inet, &mess, sizeof(mess), 0, (struct sockaddr *)&addr_client, sockaddr_in_size);
-				
 			}
 			else
 			{
-				flag = 1L;
-				strcpy(mess.text, "I'm going!");
+				mess.types = 1L;
 				sendto(fd_sock_inet, &mess, sizeof(mess), 0, (struct sockaddr *)&addr_client, sockaddr_in_size);
 			}
 		}
 	}
 	/*Закрываем все потоки и все связи*/
+	pthread_cancel(tech_channel);
+	pthread_cancel(recevier);
 	pthread_join(recevier, &status);
 	pthread_join(tech_channel, &status);
 	msgctl(id_mq, IPC_RMID, 0);
